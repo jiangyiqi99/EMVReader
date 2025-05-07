@@ -1,0 +1,37 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.13.35931.197
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EMVReader", "EMVReader.csproj", "{36C17DE2-A271-47FC-989A-CA2165BF3639}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|Any CPU = Release|Any CPU
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{36C17DE2-A271-47FC-989A-CA2165BF3639}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{36C17DE2-A271-47FC-989A-CA2165BF3639}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{36C17DE2-A271-47FC-989A-CA2165BF3639}.Debug|x64.ActiveCfg = Debug|x64
+		{36C17DE2-A271-47FC-989A-CA2165BF3639}.Debug|x64.Build.0 = Debug|x64
+		{36C17DE2-A271-47FC-989A-CA2165BF3639}.Debug|x86.ActiveCfg = Debug|x86
+		{36C17DE2-A271-47FC-989A-CA2165BF3639}.Debug|x86.Build.0 = Debug|x86
+		{36C17DE2-A271-47FC-989A-CA2165BF3639}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{36C17DE2-A271-47FC-989A-CA2165BF3639}.Release|Any CPU.Build.0 = Release|Any CPU
+		{36C17DE2-A271-47FC-989A-CA2165BF3639}.Release|x64.ActiveCfg = Release|x64
+		{36C17DE2-A271-47FC-989A-CA2165BF3639}.Release|x64.Build.0 = Release|x64
+		{36C17DE2-A271-47FC-989A-CA2165BF3639}.Release|x86.ActiveCfg = Release|x86
+		{36C17DE2-A271-47FC-989A-CA2165BF3639}.Release|x86.Build.0 = Release|x86
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {645F090E-30D2-4BDD-9638-C2A7E6F770D7}
+	EndGlobalSection
+EndGlobal
