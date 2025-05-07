@@ -16,6 +16,7 @@ using System.Drawing;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
 namespace EMVCard
@@ -32,6 +33,7 @@ namespace EMVCard
         public Int64 SendLen, RecvLen, nBytesRet;
         public ModWinsCard64.SCARD_IO_REQUEST pioSendRequest;
         private Dictionary<string, string> labelToAID = new Dictionary<string, string>();
+        private bool recordHasPrimaryData = false;
 
 
         public MainEMVReaderBin() {
@@ -160,6 +162,8 @@ namespace EMVCard
             textEXP.Text = "";
             textHolder.Text = "";
             textTrack.Text = "";
+            recordHasPrimaryData = false;
+
 
             string selectedLabel = cbPSE.Text.Trim();
             if (!labelToAID.ContainsKey(selectedLabel)) {
@@ -182,88 +186,42 @@ namespace EMVCard
             byte[] fciData = new byte[RecvLen];
             Array.Copy(RecvBuff, fciData, RecvLen);
 
-            // === 尝试发送 GPO（自动解析 PDOL）===
+            // === 发送 GPO 并自动构建 PDOL ===
             if (!SendGPOWithAutoPDOL(fciData, RecvLen)) {
-                displayOut(0, 0, "发送 GPO 失败，尝试默认读取 SFI 3 Record 1-10");
+                displayOut(0, 0, "发送 GPO 失败");
+                return;
             }
 
-            // === 优先尝试从 GPO 响应中提取 AFL (Tag 94 in 77 format) ===
-            bool aflFound = false;
+            // === 先尝试直接解析 GPO 响应中是否包含 Track2、PAN 等 TLV 字段 ===
+            ParseTLV(RecvBuff, 0, (int)RecvLen - 2);
 
-            // Tag 77 模板
-            for (int i = 0; i < RecvLen - 2; i++) {
-                if (RecvBuff[i] == 0x94) {
-                    aflFound = true;
-                    int len = RecvBuff[i + 1];
-                    for (int j = 0; j + 4 <= len; j += 4) {
-                        int sfi = RecvBuff[i + 2 + j] >> 3;
-                        int recordStart = RecvBuff[i + 3 + j];
-                        int recordEnd = RecvBuff[i + 4 + j];
-
-                        for (int rec = recordStart; rec <= recordEnd; rec++) {
-                            string cmd = $"00 B2 {rec:X2} {((sfi << 3) | 4):X2} 00";
-                            SendLen = FillBufferFromHexString(cmd, SendBuff, 0);
-                            RecvLen = 0xFF;
-                            result = TransmitWithAutoFix();
-                            if (result != 0 || RecvLen < 2 || !(RecvBuff[RecvLen - 2] == 0x90 && RecvBuff[RecvLen - 1] == 0x00)) {
-                                displayOut(0, 0, $"SFI {sfi} Record {rec} 未返回 90 00，跳过解析");
-                                continue;
-                            }
-                            ParseRecordContent(RecvBuff, RecvLen - 2);
-                        }
-                    }
-                    break;
+            // === 再解析 AFL 并读取相关记录 ===
+            var aflList = ParseAFL(RecvBuff, RecvLen);
+            if (aflList.Count == 0) {
+                displayOut(0, 0, "未能解析出 AFL，尝试读取 SFI 1 Record 1");
+                string cmd = "00 B2 01 0C 00"; // SFI=1, Record=1
+                SendLen = FillBufferFromHexString(cmd, SendBuff, 0);
+                RecvLen = 0xFF;
+                result = TransmitWithAutoFix();
+                if (result == 0 && RecvLen >= 2 && RecvBuff[RecvLen - 2] == 0x90 && RecvBuff[RecvLen - 1] == 0x00) {
+                    ParseRecordContent(RecvBuff, RecvLen - 2);
                 }
+                return;
             }
 
-            // Tag 80 模板：简化格式 GPO，AFL 紧跟 AIP（2 字节）之后
-            if (!aflFound && RecvBuff[0] == 0x80 && RecvLen >= 6) {
-                aflFound = true;
-                int aflStart = 4; // 跳过 Tag(1) + Len(1) + AIP(2)
-                int aflLen = RecvBuff[1] - 2; // AFL 长度 = 总长 - AIP(2)
-                for (int i = 0; i + 4 <= aflLen; i += 4) {
-                    int sfi = RecvBuff[aflStart + i] >> 3;
-                    int recordStart = RecvBuff[aflStart + i + 1];
-                    int recordEnd = RecvBuff[aflStart + i + 2];
-
-                    for (int rec = recordStart; rec <= recordEnd; rec++) {
-                        string cmd = $"00 B2 {rec:X2} {((sfi << 3) | 4):X2} 00";
-                        SendLen = FillBufferFromHexString(cmd, SendBuff, 0);
-                        RecvLen = 0xFF;
-                        result = TransmitWithAutoFix();
-                        if (result != 0 || RecvLen < 2 || !(RecvBuff[RecvLen - 2] == 0x90 && RecvBuff[RecvLen - 1] == 0x00)) {
-                            displayOut(0, 0, $"SFI {sfi} Record {rec} 未返回 90 00，跳过解析");
-                            continue;
-                        }
-                        ParseRecordContent(RecvBuff, RecvLen - 2);
+            // 遍历 AFL 读取所有记录
+            foreach (var (sfi, start, end) in aflList) {
+                for (int rec = start; rec <= end; rec++) {
+                    string cmd = $"00 B2 {rec:X2} {((sfi << 3) | 4):X2} 00";
+                    SendLen = FillBufferFromHexString(cmd, SendBuff, 0);
+                    RecvLen = 0xFF;
+                    result = TransmitWithAutoFix();
+                    if (result != 0 || RecvLen < 2 || !(RecvBuff[RecvLen - 2] == 0x90 && RecvBuff[RecvLen - 1] == 0x00)) {
+                        displayOut(0, 0, $"SFI {sfi} Record {rec} 未返回 90 00，跳过解析");
+                        continue;
                     }
+                    ParseRecordContent(RecvBuff, RecvLen - 2);
                 }
-            }
-
-            // === 如果没有 AFL，尝试解析 Track2 数据 (Tag 57) ===
-            if (!aflFound) {
-                for (int i = 0; i < RecvLen - 2; i++) {
-                    if (RecvBuff[i] == 0x57) {
-                        int len = RecvBuff[i + 1];
-                        byte[] track2 = new byte[len];
-                        Array.Copy(RecvBuff, i + 2, track2, 0, len);
-                        string track2str = BitConverter.ToString(track2).Replace("-", "");
-                        textTrack.Text = track2str;
-                        displayOut(0, 0, $"Track2 数据: {track2str}");
-
-                        int dIndex = track2str.IndexOf("D");
-                        if (dIndex > 0) {
-                            string pan = track2str.Substring(0, dIndex);
-                            string expiry = track2str.Substring(dIndex + 1, 4);
-                            textCardNum.Text = pan;
-                            textEXP.Text = $"20{expiry.Substring(0, 2)}-{expiry.Substring(2)}";
-                            displayOut(0, 0, $"卡号: {pan}");
-                            displayOut(0, 0, $"有效期: 20{expiry.Substring(0, 2)}-{expiry.Substring(2)}");
-                        }
-                        return;
-                    }
-                }
-                displayOut(0, 0, "未能从 GPO 响应中获取有效 AFL 或 Track2 数据");
             }
         }
 
@@ -271,7 +229,7 @@ namespace EMVCard
         private void ParseRecordContent(byte[] buffer, long len) {
             for (int i = 0; i < len - 1; i++) {
                 // === Track 2 数据 (57) ===
-                if (buffer[i] == 0x57) {
+                if (buffer[i] == 0x57 && !recordHasPrimaryData) {
                     int tlen = buffer[i + 1];
                     if (i + 2 + tlen > len)
                         continue;
@@ -282,18 +240,26 @@ namespace EMVCard
                     displayOut(0, 0, $"Track2 数据: {track2str}");
 
                     int dIndex = track2str.IndexOf("D");
-                    if (dIndex > 0) {
+                    if (dIndex > 0 && track2str.Length >= dIndex + 5) {
                         string pan = track2str.Substring(0, dIndex);
-                        string expiry = track2str.Substring(dIndex + 1, 4);
-                        textCardNum.Text = pan;
-                        textEXP.Text = $"20{expiry.Substring(0, 2)}-{expiry.Substring(2)}";
-                        displayOut(0, 0, $"卡号: {pan}");
-                        displayOut(0, 0, $"有效期: 20{expiry.Substring(0, 2)}-{expiry.Substring(2)}");
+                        string expiryYYMM = track2str.Substring(dIndex + 1, 4);
+                        if (Regex.IsMatch(expiryYYMM, @"^\d{4}$")) {
+                            string expiry = $"20{expiryYYMM.Substring(0, 2)}-{expiryYYMM.Substring(2)}";
+                            textCardNum.Text = pan;
+                            textEXP.Text = expiry;
+                            displayOut(0, 0, $"卡号: {pan}");
+                            displayOut(0, 0, $"有效期: {expiry}");
+                        }
+                        else {
+                            displayOut(0, 0, $"Track2 有效期格式异常: {expiryYYMM}");
+                        }
                     }
+
+                    recordHasPrimaryData = true;
                 }
 
                 // === 持卡人姓名 (5F20) ===
-                else if (buffer[i] == 0x5F && buffer[i + 1] == 0x20) {
+                else if (buffer[i] == 0x5F && buffer[i + 1] == 0x20 && !recordHasPrimaryData) {
                     int tlen = buffer[i + 2];
                     if (i + 3 + tlen > len)
                         continue;
