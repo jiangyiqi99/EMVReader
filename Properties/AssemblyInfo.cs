@@ -5,12 +5,12 @@ using System.Runtime.InteropServices;
 // General Information about an assembly is controlled through the following 
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[assembly: AssemblyTitle("ACOSBinary")]
+[assembly: AssemblyTitle("EMVReader")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("ACS")]
-[assembly: AssemblyProduct("ACOSBinary")]
-[assembly: AssemblyCopyright("Copyright © ACS 2008")]
+[assembly: AssemblyCompany("ChainRuiLanke")]
+[assembly: AssemblyProduct("EMVReader")]
+[assembly: AssemblyCopyright("Copyright © TUTU 2025")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
@@ -20,7 +20,7 @@ using System.Runtime.InteropServices;
 [assembly: ComVisible(false)]
 
 // The following GUID is for the ID of the typelib if this project is exposed to COM
-[assembly: Guid("692f1374-e58d-4a4d-9444-8eefe6a3cf5e")]
+[assembly: Guid("E9D21D6F-2DDE-853A-9300-7381F69DE69D")]
 
 // Version information for an assembly consists of the following four values:
 //
@@ -29,5 +29,5 @@ using System.Runtime.InteropServices;
 //      Build Number
 //      Revision
 //
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.0.2.0")]
+[assembly: AssemblyFileVersion("1.0.2.0")]

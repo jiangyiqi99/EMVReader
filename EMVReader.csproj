@@ -90,7 +90,7 @@
     <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup>
-    <StartupObject>ACOSBinary.Program</StartupObject>
+    <StartupObject>EMVCard.Program</StartupObject>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />

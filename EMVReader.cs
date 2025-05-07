@@ -1,17 +1,11 @@
 /*=========================================================================================
 '  Copyright(C):    Advanced Card Systems Ltd 
-' 
-'  Description:     This sample program outlines the steps on how to
-'                   implement the binary file support in ACOS3-24K
 '  
-'  Author :         Daryl M. Rojas
+'  Author :         Eternal TUTU
 '
 '  Module :         EMVReader.cs
 '   
 '  Date   :         June 23, 2008
-'
-' Revision Trail:   (Date/Author/Description) 
-'                    April 20, 2010/ Gil Bagaporo/ Converted to VS.NET 2008
 '==========================================================================================*/
 
 using System;
@@ -23,7 +17,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Windows.Forms;
 
-namespace ACOSBinary
+namespace EMVCard
 {
     public partial class MainEMVReaderBin : Form
     {
@@ -199,9 +193,13 @@ namespace ACOSBinary
                     RecvLen = 0xFF;
 
                     result = TransmitWithAutoFix();
-                    if (result == 0) {
+                    if (result == 0 && RecvLen >= 2 &&
+                        RecvBuff[RecvLen - 2] == 0x90 && RecvBuff[RecvLen - 1] == 0x00) {
                         displayOut(0, 0, $"读取默认 SFI 3, Record {record} 成功");
-                        ParseTLV(RecvBuff, 0, (int)RecvLen);
+                        ParseTLV(RecvBuff, 0, (int)RecvLen - 2);
+                    }
+                    else {
+                        displayOut(0, 0, $"SFI 3 Record {record} 未返回 90 00，跳过解析");
                     }
                 }
                 return;
@@ -229,7 +227,13 @@ namespace ACOSBinary
                     }
 
                     displayOut(0, 0, $"读取 SFI {sfi}, Record {record} 成功");
-                    ParseTLV(RecvBuff, 0, (int)RecvLen);
+                    if (RecvLen >= 2 &&RecvBuff[RecvLen - 2] == 0x90 && RecvBuff[RecvLen - 1] == 0x00) {
+                        ParseTLV(RecvBuff, 0, (int)RecvLen - 2);
+                    }
+                    else {
+                        displayOut(0, 0, $"SFI {sfi} Record {record} 未返回 90 00，跳过解析");
+                    }
+
                 }
             }
         }
@@ -576,7 +580,16 @@ namespace ACOSBinary
             );
 
             if (retCode == ModWinsCard64.SCARD_S_SUCCESS) {
-                displayOut(0, 0, "ATR: " + BitConverter.ToString(atr, 0, (int)atrLen));
+                string atrStr = BitConverter.ToString(atr, 0, (int)atrLen);
+                displayOut(0, 0, "ATR: " + atrStr);
+
+                // 简单判断是否接触式卡
+                if (atrLen > 0 && (atr[0] == 0x3B || atr[0] == 0x3F)) {
+                    displayOut(0, 0, "卡片默认在接触式模式工作");
+                }
+                else {
+                    displayOut(0, 0, "卡片默认在非接触式模式工作");
+                }
             }
             else {
                 displayOut(1, retCode, "无法读取 ATR");
