@@ -13,6 +13,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
 using System.Drawing;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Windows.Forms;
@@ -154,91 +155,159 @@ namespace EMVCard
             return retCode;
         }
 
-
         private void bReadApp_Click(object sender, EventArgs e) {
             textCardNum.Text = "";
             textEXP.Text = "";
             textHolder.Text = "";
             textTrack.Text = "";
 
-            // Begin select Application
-            if (cbPSE.SelectedItem == null) {
-                displayOut(0, 0, "请选择一个 Application Label");
-                return;
-            }
-            string label = cbPSE.SelectedItem.ToString();
-            if (!labelToAID.ContainsKey(label)) {
-                displayOut(0, 0, "未找到该 Label 对应的 AID");
+            string selectedLabel = cbPSE.Text.Trim();
+            if (!labelToAID.ContainsKey(selectedLabel)) {
+                displayOut(0, 0, "请选择一个应用 AID");
                 return;
             }
 
-            // === 1. 选择 AID ===
-            string aidHex = labelToAID[label];
-            string selectApdu = "00 A4 04 00 " + (aidHex.Length / 2).ToString("X2") + " " + InsertSpaces(aidHex);
-            int cmdLen = FillBufferFromHexString(selectApdu, SendBuff, 0);
-            SendLen = cmdLen;
+            string aidHex = labelToAID[selectedLabel];
+            string[] aidBytes = aidHex.Split(' ');
+            string selectAID = $"00 A4 04 00 {aidBytes.Length:X2} {aidHex}";
+            SendLen = FillBufferFromHexString(selectAID, SendBuff, 0);
             RecvLen = 0xFF;
-            int result = TransmitWithAutoFix(); // 自动处理 61
-            if (result != 0)
+
+            int result = TransmitWithAutoFix();
+            if (result != 0 || !(RecvBuff[RecvLen - 2] == 0x90 && RecvBuff[RecvLen - 1] == 0x00)) {
+                displayOut(0, 0, "选择 AID 失败");
                 return;
+            }
 
-            // === 2. 发送 GPO 命令 ===
-            if (!SendGPOWithAutoPDOL(RecvBuff, (int)RecvLen)) {
-                displayOut(0, 0, "发送 GPO 失败，尝试默认 SFI 3 Record 1-10");
+            byte[] fciData = new byte[RecvLen];
+            Array.Copy(RecvBuff, fciData, RecvLen);
 
-                for (int record = 1; record <= 10; record++) {
-                    int sfiByte = (3 << 3) | 0x04;
-                    string readApdu = $"00 B2 {record:X2} {sfiByte:X2} 00";
-                    SendLen = FillBufferFromHexString(readApdu, SendBuff, 0);
-                    RecvLen = 0xFF;
+            // === 尝试发送 GPO（自动解析 PDOL）===
+            if (!SendGPOWithAutoPDOL(fciData, RecvLen)) {
+                displayOut(0, 0, "发送 GPO 失败，尝试默认读取 SFI 3 Record 1-10");
+            }
 
-                    result = TransmitWithAutoFix();
-                    if (result == 0 && RecvLen >= 2 &&
-                        RecvBuff[RecvLen - 2] == 0x90 && RecvBuff[RecvLen - 1] == 0x00) {
-                        displayOut(0, 0, $"读取默认 SFI 3, Record {record} 成功");
-                        ParseTLV(RecvBuff, 0, (int)RecvLen - 2);
+            // === 优先尝试从 GPO 响应中提取 AFL (Tag 94 in 77 format) ===
+            bool aflFound = false;
+
+            // Tag 77 模板
+            for (int i = 0; i < RecvLen - 2; i++) {
+                if (RecvBuff[i] == 0x94) {
+                    aflFound = true;
+                    int len = RecvBuff[i + 1];
+                    for (int j = 0; j + 4 <= len; j += 4) {
+                        int sfi = RecvBuff[i + 2 + j] >> 3;
+                        int recordStart = RecvBuff[i + 3 + j];
+                        int recordEnd = RecvBuff[i + 4 + j];
+
+                        for (int rec = recordStart; rec <= recordEnd; rec++) {
+                            string cmd = $"00 B2 {rec:X2} {((sfi << 3) | 4):X2} 00";
+                            SendLen = FillBufferFromHexString(cmd, SendBuff, 0);
+                            RecvLen = 0xFF;
+                            result = TransmitWithAutoFix();
+                            if (result != 0 || RecvLen < 2 || !(RecvBuff[RecvLen - 2] == 0x90 && RecvBuff[RecvLen - 1] == 0x00)) {
+                                displayOut(0, 0, $"SFI {sfi} Record {rec} 未返回 90 00，跳过解析");
+                                continue;
+                            }
+                            ParseRecordContent(RecvBuff, RecvLen - 2);
+                        }
                     }
-                    else {
-                        displayOut(0, 0, $"SFI 3 Record {record} 未返回 90 00，跳过解析");
+                    break;
+                }
+            }
+
+            // Tag 80 模板：简化格式 GPO，AFL 紧跟 AIP（2 字节）之后
+            if (!aflFound && RecvBuff[0] == 0x80 && RecvLen >= 6) {
+                aflFound = true;
+                int aflStart = 4; // 跳过 Tag(1) + Len(1) + AIP(2)
+                int aflLen = RecvBuff[1] - 2; // AFL 长度 = 总长 - AIP(2)
+                for (int i = 0; i + 4 <= aflLen; i += 4) {
+                    int sfi = RecvBuff[aflStart + i] >> 3;
+                    int recordStart = RecvBuff[aflStart + i + 1];
+                    int recordEnd = RecvBuff[aflStart + i + 2];
+
+                    for (int rec = recordStart; rec <= recordEnd; rec++) {
+                        string cmd = $"00 B2 {rec:X2} {((sfi << 3) | 4):X2} 00";
+                        SendLen = FillBufferFromHexString(cmd, SendBuff, 0);
+                        RecvLen = 0xFF;
+                        result = TransmitWithAutoFix();
+                        if (result != 0 || RecvLen < 2 || !(RecvBuff[RecvLen - 2] == 0x90 && RecvBuff[RecvLen - 1] == 0x00)) {
+                            displayOut(0, 0, $"SFI {sfi} Record {rec} 未返回 90 00，跳过解析");
+                            continue;
+                        }
+                        ParseRecordContent(RecvBuff, RecvLen - 2);
                     }
                 }
-                return;
             }
 
-            // === 3. 解析 GPO 返回中的 AFL ===
-            var aflList = ParseAFL(RecvBuff, RecvLen);
-            if (aflList.Count == 0) {
-                displayOut(0, 0, "未能从 GPO 响应中获取有效 AFL");
-                return;
+            // === 如果没有 AFL，尝试解析 Track2 数据 (Tag 57) ===
+            if (!aflFound) {
+                for (int i = 0; i < RecvLen - 2; i++) {
+                    if (RecvBuff[i] == 0x57) {
+                        int len = RecvBuff[i + 1];
+                        byte[] track2 = new byte[len];
+                        Array.Copy(RecvBuff, i + 2, track2, 0, len);
+                        string track2str = BitConverter.ToString(track2).Replace("-", "");
+                        textTrack.Text = track2str;
+                        displayOut(0, 0, $"Track2 数据: {track2str}");
+
+                        int dIndex = track2str.IndexOf("D");
+                        if (dIndex > 0) {
+                            string pan = track2str.Substring(0, dIndex);
+                            string expiry = track2str.Substring(dIndex + 1, 4);
+                            textCardNum.Text = pan;
+                            textEXP.Text = $"20{expiry.Substring(0, 2)}-{expiry.Substring(2)}";
+                            displayOut(0, 0, $"卡号: {pan}");
+                            displayOut(0, 0, $"有效期: 20{expiry.Substring(0, 2)}-{expiry.Substring(2)}");
+                        }
+                        return;
+                    }
+                }
+                displayOut(0, 0, "未能从 GPO 响应中获取有效 AFL 或 Track2 数据");
             }
+        }
 
-            // === 4. 遍历 AFL 指定的记录进行读取 ===
-            foreach (var (sfi, start, end) in aflList) {
-                for (int record = start; record <= end; record++) {
-                    int sfiByte = (sfi << 3) | 0x04;
-                    string readApdu = $"00 B2 {record:X2} {sfiByte:X2} 00";
-                    SendLen = FillBufferFromHexString(readApdu, SendBuff, 0);
-                    RecvLen = 0xFF;
 
-                    result = TransmitWithAutoFix();
-                    if (result != 0) {
-                        displayOut(0, 0, $"读取 SFI {sfi}, Record {record} 失败");
+        private void ParseRecordContent(byte[] buffer, long len) {
+            for (int i = 0; i < len - 1; i++) {
+                // === Track 2 数据 (57) ===
+                if (buffer[i] == 0x57) {
+                    int tlen = buffer[i + 1];
+                    if (i + 2 + tlen > len)
                         continue;
-                    }
+                    byte[] track2 = new byte[tlen];
+                    Array.Copy(buffer, i + 2, track2, 0, tlen);
+                    string track2str = BitConverter.ToString(track2).Replace("-", "");
+                    textTrack.Text = track2str;
+                    displayOut(0, 0, $"Track2 数据: {track2str}");
 
-                    displayOut(0, 0, $"读取 SFI {sfi}, Record {record} 成功");
-                    if (RecvLen >= 2 &&RecvBuff[RecvLen - 2] == 0x90 && RecvBuff[RecvLen - 1] == 0x00) {
-                        ParseTLV(RecvBuff, 0, (int)RecvLen - 2);
+                    int dIndex = track2str.IndexOf("D");
+                    if (dIndex > 0) {
+                        string pan = track2str.Substring(0, dIndex);
+                        string expiry = track2str.Substring(dIndex + 1, 4);
+                        textCardNum.Text = pan;
+                        textEXP.Text = $"20{expiry.Substring(0, 2)}-{expiry.Substring(2)}";
+                        displayOut(0, 0, $"卡号: {pan}");
+                        displayOut(0, 0, $"有效期: 20{expiry.Substring(0, 2)}-{expiry.Substring(2)}");
                     }
-                    else {
-                        displayOut(0, 0, $"SFI {sfi} Record {record} 未返回 90 00，跳过解析");
-                    }
+                }
 
+                // === 持卡人姓名 (5F20) ===
+                else if (buffer[i] == 0x5F && buffer[i + 1] == 0x20) {
+                    int tlen = buffer[i + 2];
+                    if (i + 3 + tlen > len)
+                        continue;
+                    byte[] nameBytes = new byte[tlen];
+                    Array.Copy(buffer, i + 3, nameBytes, 0, tlen);
+                    string name = Encoding.ASCII.GetString(nameBytes).Trim();
+                    textHolder.Text = name;
+                    displayOut(0, 0, $"持卡人姓名: {name}");
                 }
             }
         }
 
-        private bool SendGPOWithAutoPDOL(byte[] fciBuffer, int fciLen) {
+
+        private bool SendGPOWithAutoPDOL(byte[] fciBuffer, long fciLen) {
             int index = 0;
             while (index < fciLen - 2) {
                 if (fciBuffer[index] == 0x9F && fciBuffer[index + 1] == 0x38) {
@@ -250,25 +319,47 @@ namespace EMVCard
                     int pdolIndex = 0;
                     List<byte> pdolData = new List<byte>();
                     while (pdolIndex < pdolRaw.Length) {
-                        int tag1 = pdolRaw[pdolIndex++];
-                        int tag = tag1;
-                        if ((tag1 & 0x1F) == 0x1F)
+                        int tag = pdolRaw[pdolIndex++];
+                        if ((tag & 0x1F) == 0x1F) {
                             tag = (tag << 8) | pdolRaw[pdolIndex++];
+                        }
 
                         int tagLen = pdolRaw[pdolIndex++];
 
+                        // 填充各类 PDOL 数据
                         switch (tag) {
-                            case 0x9F02:
+                            case 0x9F66: // TTQ
+                                pdolData.AddRange(new byte[] { 0x37, 0x00, 0x00, 0x00 });
+                                break;
+                            case 0x9F02: // Amount Authorized
                                 pdolData.AddRange(new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 });
                                 break;
-                            case 0x9F1A:
+                            case 0x9F03: // Amount Other (Cashback)
+                                pdolData.AddRange(new byte[tagLen]);
+                                break;
+                            case 0x9F1A: // Terminal Country Code (China: 0156)
+                            case 0x5F2A: // Transaction Currency Code (RMB: 0156)
                                 pdolData.AddRange(new byte[] { 0x01, 0x56 });
                                 break;
-                            case 0x5F2A:
-                                pdolData.AddRange(new byte[] { 0x01, 0x56 });
+                            case 0x9A: // Transaction Date (YYMMDD)
+                                var date = DateTime.Now;
+                                pdolData.AddRange(new byte[] {
+                            (byte)(date.Year % 100),
+                            (byte)(date.Month),
+                            (byte)(date.Day)
+                        });
+                                break;
+                            case 0x9C: // Transaction Type (default: Purchase)
+                                pdolData.Add(0x00);
+                                break;
+                            case 0x9F37: // Unpredictable Number
+                                var rnd = new Random();
+                                for (int i = 0; i < tagLen; i++) {
+                                    pdolData.Add((byte)rnd.Next(0, 256));
+                                }
                                 break;
                             default:
-                                pdolData.AddRange(new byte[tagLen]);
+                                pdolData.AddRange(new byte[tagLen]); // 填0
                                 break;
                         }
                     }
@@ -303,7 +394,7 @@ namespace EMVCard
                 }
             }
 
-            // 没有 PDOL，则使用简化 GPO
+            // === 无 PDOL，发送简化 GPO ===
             string gpoEmpty = "80 A8 00 00 02 83 00 00";
             SendLen = FillBufferFromHexString(gpoEmpty, SendBuff, 0);
             RecvLen = 0xFF;
@@ -320,7 +411,6 @@ namespace EMVCard
                 return false;
             }
         }
-
 
         private int TransmitWithAutoFix() {
             int result = SendAPDUandDisplay();
@@ -406,8 +496,9 @@ namespace EMVCard
             textEXP.Text = "";
             textHolder.Text = "";
             textTrack.Text = "";
+            labelToAID.Clear();
 
-            // === 1. 选择 PSE 应用（1PAY.SYS.DDF01）===
+            // === 1. 选择 PSE 应用（1PAY.SYS.DDF01） ===
             string selectPSE = "00 A4 04 00 0E 31 50 41 59 2E 53 59 53 2E 44 44 46 30 31";
             int cmdLen = FillBufferFromHexString(selectPSE, SendBuff, 0);
             SendLen = cmdLen;
@@ -418,26 +509,36 @@ namespace EMVCard
                 return;
             }
 
-            // === 2. 读取 SFI 1 的 Record 1（通常包含所有 AID 信息）===
-            string readSFI1 = "00 B2 01 0C 00"; // SFI=1, Record=1, Le=00
-            cmdLen = FillBufferFromHexString(readSFI1, SendBuff, 0);
-            SendLen = cmdLen;
-            RecvLen = 0xFF;
-            result = TransmitWithAutoFix();
-            if (result != 0) {
-                displayOut(0, 0, "读取 SFI 1 Record 1 失败");
-                return;
+            // === 2. 从 SFI 1 开始逐条读取 Record，直到返回 6A 83 ===
+            for (int record = 1; ; record++) {
+                string readSFI = $"00 B2 {record:X2} 0C 00"; // SFI=1, P2=0C, Le=00
+                SendLen = FillBufferFromHexString(readSFI, SendBuff, 0);
+                RecvLen = 0xFF;
+
+                result = TransmitWithAutoFix();
+
+                // 检查是否为“记录不存在”
+                if (RecvLen == 2 && RecvBuff[0] == 0x6A && RecvBuff[1] == 0x83) {
+                    displayOut(0, 0, $"Record {record} 不存在，结束读取 AID");
+                    break;
+                }
+
+                // 检查是否为成功
+                if (result != 0 || RecvLen < 2 || !(RecvBuff[RecvLen - 2] == 0x90 && RecvBuff[RecvLen - 1] == 0x00)) {
+                    displayOut(0, 0, $"Record {record} 读取失败，停止");
+                    break;
+                }
+
+                displayOut(0, 0, $"解析 Record {record} 中的 AID 信息");
+                ParseSFIRecord(RecvBuff, RecvLen - 2); // 忽略尾部 SW1 SW2
             }
 
-            // === 3. 解析 Record，提取 Application Label 并加入下拉框 ===
-            ParseSFIRecord(RecvBuff, RecvLen);
-
-            // === 若 cbPSE 有内容则自动选中第一个 ===
+            // === 自动选中第一个应用（如有）===
             if (cbPSE.Items.Count > 0 && cbPSE.SelectedIndex == -1) {
                 cbPSE.SelectedIndex = 0;
             }
-
         }
+
 
         private string InsertSpaces(string hex) {
             StringBuilder spaced = new StringBuilder();
@@ -449,8 +550,91 @@ namespace EMVCard
             return spaced.ToString();
         }
 
+
+        private void bLoadPPSE_Click(object sender, EventArgs e) {
+            cbPSE.Items.Clear();
+            cbPSE.Text = "";
+            textCardNum.Text = "";
+            textEXP.Text = "";
+            textHolder.Text = "";
+            textTrack.Text = "";
+            labelToAID.Clear();
+
+            // === 1. 选择 PPSE 应用 ===
+            string selectPPSE = "00 A4 04 00 0E 32 50 41 59 2E 53 59 53 2E 44 44 46 30 31";
+            int cmdLen = FillBufferFromHexString(selectPPSE, SendBuff, 0);
+            SendLen = cmdLen;
+            RecvLen = 0xFF;
+            int result = TransmitWithAutoFix();
+            if (result != 0 || RecvLen < 2 || !(RecvBuff[RecvLen - 2] == 0x90 && RecvBuff[RecvLen - 1] == 0x00)) {
+                displayOut(0, 0, "选择 PPSE 应用失败");
+                return;
+            }
+
+            // === 2. 从返回的 FCI Template 中查找所有 Application Template (61) ===
+            int index = 0;
+            while (index < RecvLen - 2) {
+                if (RecvBuff[index] == 0x61) {
+                    int len = RecvBuff[index + 1];
+                    int start = index + 2;
+                    int end = start + len;
+                    if (end > RecvLen - 2)
+                        break;
+
+                    string currentAID = "";
+                    string label = "";
+
+                    int subIndex = start;
+                    while (subIndex < end) {
+                        byte tag = RecvBuff[subIndex++];
+                        if (subIndex >= end)
+                            break;
+                        int tagLen = RecvBuff[subIndex++];
+
+                        if (subIndex + tagLen > end)
+                            break;
+                        byte[] value = new byte[tagLen];
+                        Array.Copy(RecvBuff, subIndex, value, 0, tagLen);
+                        subIndex += tagLen;
+
+                        if (tag == 0x4F) {
+                            currentAID = string.Join(" ", value.Select(b => b.ToString("X2")));
+                            displayOut(0, 0, "AID: " + currentAID);
+                        }
+
+
+                        else if (tag == 0x50) {
+                            label = Encoding.ASCII.GetString(value).Trim();
+                            displayOut(0, 0, "Application Label: " + label);
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(currentAID)) {
+                        if (string.IsNullOrEmpty(label)) {
+                            label = "App_" + currentAID.Substring(currentAID.Length - 4);
+                        }
+                        if (!cbPSE.Items.Contains(label)) {
+                            cbPSE.Items.Add(label);
+                            labelToAID[label] = currentAID;
+                        }
+                    }
+
+                    index = end;
+                }
+                else {
+                    index++;
+                }
+            }
+
+            // === 自动选中第一个 ===
+            if (cbPSE.Items.Count > 0 && cbPSE.SelectedIndex == -1) {
+                cbPSE.SelectedIndex = 0;
+            }
+        }
+
+
         private void ParseTLV(byte[] buffer, int startIndex, int endIndex) {
-            int index = startIndex;
+            long index = startIndex;
 
             while (index < endIndex) {
                 if (index >= buffer.Length)
@@ -472,7 +656,7 @@ namespace EMVCard
 
                 long len = buffer[index++];
                 if (len >= 0x80) {
-                    int lenLen = (int)(len & 0x7F);
+                    long lenLen = (len & 0x7F);
 
                     // 防止异常长度声明（EMV 一般不会超过 3 字节）
                     if (lenLen <= 0 || lenLen > 3) {
@@ -494,15 +678,15 @@ namespace EMVCard
                 if (len < 0 || len > 4096 || index + len > buffer.Length) {
                     displayOut(0, 0, $"TLV 长度非法：len={len}，index={index}");
                     // 打印当前片段用于调试
-                    int printStart = Math.Max(index - 5, 0);
-                    int printLen = Math.Min(10, buffer.Length - printStart);
-                    displayOut(0, 0, "可疑 TLV 片段: " + BitConverter.ToString(buffer, printStart, printLen));
+                    long printStart = Math.Max(index - 5, 0);
+                    long printLen = Math.Min(10, buffer.Length - printStart);
+                    displayOut(0, 0, "可疑 TLV 片段: " + BitConverter.ToString(buffer, (int)printStart, (int)printLen));
                     break;
                 }
 
                 byte[] value = new byte[len];
-                Array.Copy(buffer, index, value, 0, (int)len);
-                index += (int)len;
+                Array.Copy(buffer, index, value, 0, len);
+                index += len;
 
                 switch (tagValue) {
                     case 0x5A: // PAN
@@ -667,7 +851,7 @@ namespace EMVCard
                 // 解析并打印常见字段
                 switch (tagValue) {
                     case 0x4F: // AID
-                        currentAID = BitConverter.ToString(value).Replace("-", "");
+                        currentAID = string.Join(" ", value.Select(b => b.ToString("X2")));
                         displayOut(0, 0, "AID: " + currentAID);
                         break;
                     case 0x50: // Application Label

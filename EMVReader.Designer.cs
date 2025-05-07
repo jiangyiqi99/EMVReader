@@ -46,6 +46,7 @@ namespace EMVCard
             this.label5 = new System.Windows.Forms.Label();
             this.textTrack = new System.Windows.Forms.TextBox();
             this.bLoadPSE = new System.Windows.Forms.Button();
+            this.bLoadPPSE = new System.Windows.Forms.Button();
             this.SuspendLayout();
             // 
             // Label1
@@ -225,19 +226,30 @@ namespace EMVCard
             // 
             // bLoadPSE
             // 
-            this.bLoadPSE.Location = new System.Drawing.Point(35, 147);
+            this.bLoadPSE.Location = new System.Drawing.Point(35, 133);
             this.bLoadPSE.Name = "bLoadPSE";
-            this.bLoadPSE.Size = new System.Drawing.Size(121, 31);
+            this.bLoadPSE.Size = new System.Drawing.Size(121, 45);
             this.bLoadPSE.TabIndex = 34;
-            this.bLoadPSE.Text = "Load PSE";
+            this.bLoadPSE.Text = "Load PSE\r\n接触式";
             this.bLoadPSE.UseVisualStyleBackColor = true;
             this.bLoadPSE.Click += new System.EventHandler(this.bLoadPSE_Click);
             // 
-            // MainACOSBin
+            // bLoadPPSE
+            // 
+            this.bLoadPPSE.Location = new System.Drawing.Point(196, 133);
+            this.bLoadPPSE.Name = "bLoadPPSE";
+            this.bLoadPPSE.Size = new System.Drawing.Size(129, 44);
+            this.bLoadPPSE.TabIndex = 35;
+            this.bLoadPPSE.Text = "Load PPSE\r\n（非接触）";
+            this.bLoadPPSE.UseVisualStyleBackColor = true;
+            this.bLoadPPSE.Click += new System.EventHandler(this.bLoadPPSE_Click);
+            // 
+            // MainEMVReaderBin
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(766, 542);
+            this.Controls.Add(this.bLoadPPSE);
             this.Controls.Add(this.bLoadPSE);
             this.Controls.Add(this.textTrack);
             this.Controls.Add(this.label5);
@@ -261,7 +273,7 @@ namespace EMVCard
             this.Font = new System.Drawing.Font("Verdana", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Margin = new System.Windows.Forms.Padding(4);
-            this.Name = "MainACOSBin";
+            this.Name = "MainEMVReaderBin";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "PS/SC EMV Card Reader";
             this.ResumeLayout(false);
@@ -290,6 +302,7 @@ namespace EMVCard
         private System.Windows.Forms.Label label5;
         private System.Windows.Forms.TextBox textTrack;
         private System.Windows.Forms.Button bLoadPSE;
+        private System.Windows.Forms.Button bLoadPPSE;
     }
 }
 
