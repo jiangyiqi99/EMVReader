@@ -33,7 +33,6 @@ namespace EMVCard
         public Int64 SendLen, RecvLen, nBytesRet;
         public ModWinsCard64.SCARD_IO_REQUEST pioSendRequest;
         private Dictionary<string, string> labelToAID = new Dictionary<string, string>();
-        private bool recordHasPrimaryData = false;
 
 
         public MainEMVReaderBin() {
@@ -162,13 +161,11 @@ namespace EMVCard
             textEXP.Text = "";
             textHolder.Text = "";
             textTrack.Text = "";
-            recordHasPrimaryData = false;
-
 
             string selectedLabel = cbPSE.Text.Trim();
             if (!labelToAID.ContainsKey(selectedLabel)) {
                 displayOut(0, 0, "请选择一个应用 AID");
-                return;
+                return;  // 这里的返回是合理的，因为没有选择AID
             }
 
             string aidHex = labelToAID[selectedLabel];
@@ -180,94 +177,207 @@ namespace EMVCard
             int result = TransmitWithAutoFix();
             if (result != 0 || !(RecvBuff[RecvLen - 2] == 0x90 && RecvBuff[RecvLen - 1] == 0x00)) {
                 displayOut(0, 0, "选择 AID 失败");
-                return;
+                return;  // 这里的返回是合理的，因为AID选择失败
             }
 
             byte[] fciData = new byte[RecvLen];
             Array.Copy(RecvBuff, fciData, RecvLen);
 
             // === 发送 GPO 并自动构建 PDOL ===
-            if (!SendGPOWithAutoPDOL(fciData, RecvLen)) {
+            bool gpoSuccess = SendGPOWithAutoPDOL(fciData, RecvLen);
+            if (!gpoSuccess) {
                 displayOut(0, 0, "发送 GPO 失败");
-                return;
+                // 不要在这里返回，继续尝试读取数据
             }
 
-            // === 先尝试直接解析 GPO 响应中是否包含 Track2、PAN 等 TLV 字段 ===
-            ParseTLV(RecvBuff, 0, (int)RecvLen - 2);
+            // 如果GPO成功，尝试解析GPO响应中的数据
+            if (gpoSuccess) {
+                // === 先尝试直接解析 GPO 响应中是否包含 Track2、PAN 等 TLV 字段 ===
+                ParseTLV(RecvBuff, 0, (int)RecvLen - 2, 0, true);
 
-            // === 再解析 AFL 并读取相关记录 ===
-            var aflList = ParseAFL(RecvBuff, RecvLen);
-            if (aflList.Count == 0) {
-                displayOut(0, 0, "未能解析出 AFL，尝试读取 SFI 1 Record 1");
-                string cmd = "00 B2 01 0C 00"; // SFI=1, Record=1
+                // === 再解析 AFL 并读取记录 ===
+                var aflList = ParseAFL(RecvBuff, RecvLen);
+                if (aflList.Count > 0) {
+                    // 根据 AFL 读取所有记录
+                    foreach (var (sfi, start, end) in aflList) {
+                        for (int rec = start; rec <= end; rec++) {
+                            string cmd = $"00 B2 {rec:X2} {((sfi << 3) | 4):X2} 00";
+                            SendLen = FillBufferFromHexString(cmd, SendBuff, 0);
+                            RecvLen = 0xFF;
+                            result = TransmitWithAutoFix();
+                            if (result != 0 || RecvLen < 2 || !(RecvBuff[RecvLen - 2] == 0x90 && RecvBuff[RecvLen - 1] == 0x00)) {
+                                displayOut(0, 0, $"SFI {sfi} Record {rec} 未返回 90 00，跳过解析");
+                                continue;
+                            }
+                            ParseRecordContent(RecvBuff, RecvLen - 2);
+                        }
+                    }
+                }
+                else {
+                    displayOut(0, 0, "未能解析到 AFL，尝试读取 SFI 1 Record 1");
+                    // 尝试读取一些常见的SFI和记录
+                    TryReadCommonRecords();
+                }
+            }
+            else {
+                // 如果GPO失败，也尝试读取一些常见的记录
+                displayOut(0, 0, "由于GPO失败，尝试直接读取常见记录");
+                TryReadCommonRecords();
+            }
+
+            // 最后，无论前面的步骤是否成功，都尝试从Track2补充信息
+            FillMissingInfoFromTrack2();
+        }
+
+        // 新增方法：尝试读取常见的SFI和记录
+        private void TryReadCommonRecords() {
+            // 常见的SFI和记录组合
+            int[][] commonRecords = new int[][] {
+        new int[] { 1, 1 },  // SFI 1, Record 1
+        new int[] { 2, 1 },  // SFI 2, Record 1
+        new int[] { 3, 1 },  // SFI 3, Record 1
+        new int[] { 4, 1 },  // SFI 4, Record 1
+        new int[] { 1, 2 },  // SFI 1, Record 2
+        new int[] { 2, 2 }   // SFI 2, Record 2
+    };
+
+            foreach (var record in commonRecords) {
+                int sfi = record[0];
+                int rec = record[1];
+                string cmd = $"00 B2 {rec:X2} {((sfi << 3) | 4):X2} 00";
                 SendLen = FillBufferFromHexString(cmd, SendBuff, 0);
                 RecvLen = 0xFF;
-                result = TransmitWithAutoFix();
+                int result = TransmitWithAutoFix();
                 if (result == 0 && RecvLen >= 2 && RecvBuff[RecvLen - 2] == 0x90 && RecvBuff[RecvLen - 1] == 0x00) {
-                    ParseRecordContent(RecvBuff, RecvLen - 2);
-                }
-                return;
-            }
-
-            // 遍历 AFL 读取所有记录
-            foreach (var (sfi, start, end) in aflList) {
-                for (int rec = start; rec <= end; rec++) {
-                    string cmd = $"00 B2 {rec:X2} {((sfi << 3) | 4):X2} 00";
-                    SendLen = FillBufferFromHexString(cmd, SendBuff, 0);
-                    RecvLen = 0xFF;
-                    result = TransmitWithAutoFix();
-                    if (result != 0 || RecvLen < 2 || !(RecvBuff[RecvLen - 2] == 0x90 && RecvBuff[RecvLen - 1] == 0x00)) {
-                        displayOut(0, 0, $"SFI {sfi} Record {rec} 未返回 90 00，跳过解析");
-                        continue;
-                    }
+                    displayOut(0, 0, $"成功读取 SFI {sfi} Record {rec}");
                     ParseRecordContent(RecvBuff, RecvLen - 2);
                 }
             }
         }
 
 
-        private void ParseRecordContent(byte[] buffer, long len) {
-            for (int i = 0; i < len - 1; i++) {
-                // === Track 2 数据 (57) ===
-                if (buffer[i] == 0x57 && !recordHasPrimaryData) {
-                    int tlen = buffer[i + 1];
-                    if (i + 2 + tlen > len)
-                        continue;
-                    byte[] track2 = new byte[tlen];
-                    Array.Copy(buffer, i + 2, track2, 0, tlen);
-                    string track2str = BitConverter.ToString(track2).Replace("-", "");
-                    textTrack.Text = track2str;
-                    displayOut(0, 0, $"Track2 数据: {track2str}");
+        private void FillMissingInfoFromTrack2() {
+            // 只有当卡号或有效期为空时，才从Track2中提取
+            if (!string.IsNullOrEmpty(textTrack.Text)) {
+                string track2 = textTrack.Text;
 
-                    int dIndex = track2str.IndexOf("D");
-                    if (dIndex > 0 && track2str.Length >= dIndex + 5) {
-                        string pan = track2str.Substring(0, dIndex);
-                        string expiryYYMM = track2str.Substring(dIndex + 1, 4);
-                        if (Regex.IsMatch(expiryYYMM, @"^\d{4}$")) {
-                            string expiry = $"20{expiryYYMM.Substring(0, 2)}-{expiryYYMM.Substring(2)}";
-                            textCardNum.Text = pan;
-                            textEXP.Text = expiry;
-                            displayOut(0, 0, $"卡号: {pan}");
-                            displayOut(0, 0, $"有效期: {expiry}");
-                        }
-                        else {
-                            displayOut(0, 0, $"Track2 有效期格式异常: {expiryYYMM}");
-                        }
+                // 查找分隔符"D"
+                int dIndex = track2.IndexOf("D");
+
+                if (dIndex > 0 && track2.Length >= dIndex + 5) {
+                    // 如果卡号为空，从Track2中提取
+                    if (string.IsNullOrEmpty(textCardNum.Text)) {
+                        string pan = track2.Substring(0, dIndex);
+                        pan = pan.TrimEnd('F'); // 去除尾部的F填充
+                        textCardNum.Text = pan;
+                        displayOut(0, 0, $"从Track2提取卡号: {pan}");
                     }
 
-                    recordHasPrimaryData = true;
+                    // 如果有效期为空，从Track2中提取
+                    if (string.IsNullOrEmpty(textEXP.Text) && track2.Length >= dIndex + 5) {
+                        string expiryYYMM = track2.Substring(dIndex + 1, 4);
+                        if (System.Text.RegularExpressions.Regex.IsMatch(expiryYYMM, @"^\d{4}$")) {
+                            string expiry = $"20{expiryYYMM.Substring(0, 2)}-{expiryYYMM.Substring(2)}";
+                            textEXP.Text = expiry;
+                            displayOut(0, 0, $"从Track2提取有效期: {expiry}");
+                        }
+                    }
+                }
+                else {
+                    // 处理没有明确分隔符的情况
+                    // 一些卡片可能使用"="作为分隔符，或者有其他格式
+                    dIndex = track2.IndexOf("=");
+                    if (dIndex > 0 && track2.Length >= dIndex + 5) {
+                        // 处理使用"="作为分隔符的情况
+                        if (string.IsNullOrEmpty(textCardNum.Text)) {
+                            string pan = track2.Substring(0, dIndex);
+                            pan = pan.TrimEnd('F');
+                            textCardNum.Text = pan;
+                            displayOut(0, 0, $"从Track2(=分隔)提取卡号: {pan}");
+                        }
+
+                        if (string.IsNullOrEmpty(textEXP.Text) && track2.Length >= dIndex + 5) {
+                            string expiryYYMM = track2.Substring(dIndex + 1, 4);
+                            if (System.Text.RegularExpressions.Regex.IsMatch(expiryYYMM, @"^\d{4}$")) {
+                                string expiry = $"20{expiryYYMM.Substring(0, 2)}-{expiryYYMM.Substring(2)}";
+                                textEXP.Text = expiry;
+                                displayOut(0, 0, $"从Track2(=分隔)提取有效期: {expiry}");
+                            }
+                        }
+                    }
+                    else {
+                        // 尝试使用固定位置解析
+                        // 某些卡片可能没有明确的分隔符，但遵循固定格式
+                        // 例如：前16-19位是PAN，接下来4位是有效期
+
+                        // 尝试提取PAN (假设PAN长度为16-19位)
+                        if (string.IsNullOrEmpty(textCardNum.Text)) {
+                            // 尝试不同的PAN长度
+                            for (int panLength = 16; panLength <= 19; panLength++) {
+                                if (track2.Length >= panLength) {
+                                    string possiblePan = track2.Substring(0, panLength);
+                                    // 检查是否全是数字
+                                    if (System.Text.RegularExpressions.Regex.IsMatch(possiblePan, @"^\d+$")) {
+                                        textCardNum.Text = possiblePan;
+                                        displayOut(0, 0, $"从Track2(固定格式)提取卡号: {possiblePan}");
+
+                                        // 尝试提取有效期
+                                        if (string.IsNullOrEmpty(textEXP.Text) && track2.Length >= panLength + 4) {
+                                            string expiryYYMM = track2.Substring(panLength, 4);
+                                            if (System.Text.RegularExpressions.Regex.IsMatch(expiryYYMM, @"^\d{4}$")) {
+                                                string expiry = $"20{expiryYYMM.Substring(0, 2)}-{expiryYYMM.Substring(2)}";
+                                                textEXP.Text = expiry;
+                                                displayOut(0, 0, $"从Track2(固定格式)提取有效期: {expiry}");
+                                            }
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        // 如果仍然无法解析，尝试特殊格式
+                        // 例如：某些银联卡可能有特殊格式
+                        if (string.IsNullOrEmpty(textCardNum.Text) && track2.Length >= 30) {
+                            // 检查是否是银联卡特殊格式
+                            // 例如：6231871800000762306D33122203870000000F
+                            // 其中6231871800000762是PAN，306D可能是分隔符和有效期
+
+                            // 尝试提取前16位作为PAN
+                            string possiblePan = track2.Substring(0, 16);
+                            if (possiblePan.StartsWith("62") || possiblePan.StartsWith("60")) { // 银联卡BIN通常以62或60开头
+                                textCardNum.Text = possiblePan;
+                                displayOut(0, 0, $"从Track2(银联特殊格式)提取卡号: {possiblePan}");
+
+                                // 尝试从位置16后提取有效期
+                                // 注意：这里的格式可能需要根据实际情况调整
+                                if (string.IsNullOrEmpty(textEXP.Text) && track2.Length >= 20) {
+                                    // 假设有效期在PAN后的位置，格式为YYMM
+                                    string expiryYYMM = "";
+
+                                    // 尝试不同的位置
+                                    for (int i = 16; i <= 20 && i + 4 <= track2.Length; i++) {
+                                        string possibleExpiry = track2.Substring(i, 4);
+                                        // 检查是否可能是有效期(数字或包含D/=)
+                                        if (System.Text.RegularExpressions.Regex.IsMatch(possibleExpiry, @"^[\dD=]{4}$")) {
+                                            expiryYYMM = possibleExpiry.Replace("D", "").Replace("=", "");
+                                            if (expiryYYMM.Length == 4 && System.Text.RegularExpressions.Regex.IsMatch(expiryYYMM, @"^\d{4}$")) {
+                                                string expiry = $"20{expiryYYMM.Substring(0, 2)}-{expiryYYMM.Substring(2)}";
+                                                textEXP.Text = expiry;
+                                                displayOut(0, 0, $"从Track2(银联特殊格式)提取有效期: {expiry}");
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
-                // === 持卡人姓名 (5F20) ===
-                else if (buffer[i] == 0x5F && buffer[i + 1] == 0x20 && !recordHasPrimaryData) {
-                    int tlen = buffer[i + 2];
-                    if (i + 3 + tlen > len)
-                        continue;
-                    byte[] nameBytes = new byte[tlen];
-                    Array.Copy(buffer, i + 3, nameBytes, 0, tlen);
-                    string name = Encoding.ASCII.GetString(nameBytes).Trim();
-                    textHolder.Text = name;
-                    displayOut(0, 0, $"持卡人姓名: {name}");
+                // 如果仍然无法解析，记录警告
+                if (string.IsNullOrEmpty(textCardNum.Text)) {
+                    displayOut(0, 0, $"警告：无法从Track2数据解析出卡号: {track2}");
                 }
             }
         }
@@ -599,13 +709,15 @@ namespace EMVCard
         }
 
 
-        private void ParseTLV(byte[] buffer, int startIndex, int endIndex) {
-            long index = startIndex;
+        private string ParseTLV(byte[] buffer, int startIndex, int endIndex, int priority = 0, bool storeTrack2 = true) {
+            string track2Data = null;
+            int index = startIndex;
 
             while (index < endIndex) {
                 if (index >= buffer.Length)
                     break;
 
+                // 解析Tag
                 byte tag = buffer[index++];
                 byte? tag2 = null;
 
@@ -617,80 +729,110 @@ namespace EMVCard
 
                 int tagValue = tag2.HasValue ? (tag << 8 | tag2.Value) : tag;
 
+                // 解析Length
                 if (index >= buffer.Length)
                     break;
 
-                long len = buffer[index++];
+                int len = buffer[index++];
                 if (len >= 0x80) {
-                    long lenLen = (len & 0x7F);
+                    int lenLen = (len & 0x7F);
 
-                    // 防止异常长度声明（EMV 一般不会超过 3 字节）
-                    if (lenLen <= 0 || lenLen > 3) {
+                    if (lenLen <= 0 || lenLen > 3 || index + lenLen > buffer.Length) {
                         displayOut(0, 0, $"TLV 长度字段异常：lenLen={lenLen}，index={index}");
                         break;
                     }
 
                     len = 0;
                     for (int i = 0; i < lenLen; i++) {
-                        if (index >= buffer.Length) {
-                            displayOut(0, 0, "TLV 长度字段读取越界");
-                            break;
-                        }
                         len = (len << 8) + buffer[index++];
                     }
                 }
 
-                // 安全性检查
+                // 安全检查
                 if (len < 0 || len > 4096 || index + len > buffer.Length) {
                     displayOut(0, 0, $"TLV 长度非法：len={len}，index={index}");
-                    // 打印当前片段用于调试
-                    long printStart = Math.Max(index - 5, 0);
-                    long printLen = Math.Min(10, buffer.Length - printStart);
-                    displayOut(0, 0, "可疑 TLV 片段: " + BitConverter.ToString(buffer, (int)printStart, (int)printLen));
                     break;
                 }
 
+                // 提取Value
                 byte[] value = new byte[len];
                 Array.Copy(buffer, index, value, 0, len);
                 index += len;
 
+                // 根据Tag处理数据
                 switch (tagValue) {
-                    case 0x5A: // PAN
-                        string pan = BitConverter.ToString(value).Replace("-", "");
-                        textCardNum.Text = pan;
-                        displayOut(0, 0, "卡号(PAN): " + pan);
-                        break;
-
-                    case 0x5F24: // Expiry
-                        string rawDate = BitConverter.ToString(value).Replace("-", "");
-                        if (rawDate.Length >= 4) {
-                            string expiry = "20" + rawDate.Substring(0, 2) + "-" + rawDate.Substring(2, 2);
-                            textEXP.Text = expiry;
-                            displayOut(0, 0, "有效期: " + expiry);
+                    case 0x5A: // PAN (卡号)
+                        if (priority > 0 || string.IsNullOrEmpty(textCardNum.Text)) {
+                            string pan = BitConverter.ToString(value).Replace("-", "");
+                            // 去除尾部的F填充
+                            pan = pan.TrimEnd('F');
+                            textCardNum.Text = pan;
+                            displayOut(0, 0, $"卡号(PAN): {pan}");
                         }
                         break;
 
-                    case 0x5F20: // Name
-                        string name = Encoding.ASCII.GetString(value);
-                        textHolder.Text = name;
-                        displayOut(0, 0, "持卡人姓名: " + name);
+                    case 0x5F24: // 有效期
+                        if (priority > 0 || string.IsNullOrEmpty(textEXP.Text)) {
+                            string rawDate = BitConverter.ToString(value).Replace("-", "");
+                            string expiry = "";
+
+                            if (rawDate.Length >= 6) {
+                                expiry = $"20{rawDate.Substring(0, 2)}-{rawDate.Substring(2, 2)}-{rawDate.Substring(4, 2)}";
+                            }
+                            else if (rawDate.Length >= 4) {
+                                expiry = $"20{rawDate.Substring(0, 2)}-{rawDate.Substring(2, 2)}";
+                            }
+
+                            if (!string.IsNullOrEmpty(expiry)) {
+                                textEXP.Text = expiry;
+                                displayOut(0, 0, $"有效期: {expiry}");
+                            }
+                        }
                         break;
 
-                    case 0x57: // Track2
+                    case 0x5F20: // 持卡人姓名
+                        if (priority > 0 || string.IsNullOrEmpty(textHolder.Text)) {
+                            string name = Encoding.ASCII.GetString(value).Trim();
+                            textHolder.Text = name;
+                            displayOut(0, 0, $"持卡人姓名: {name}");
+                        }
+                        break;
+
+                    case 0x57: // Track2数据
                         string track2 = BitConverter.ToString(value).Replace("-", "");
-                        textTrack.Text = track2;
-                        displayOut(0, 0, "Track2 数据: " + track2);
+                        if (storeTrack2) {
+                            textTrack.Text = track2;
+                            track2Data = track2;
+                            displayOut(0, 0, $"Track2 数据: {track2}");
+                        }
                         break;
 
-                    case 0x70: // FCI or EMV Template
-                        ParseTLV(value, 0, value.Length); // 递归解析
+                    case 0x9F6B: // Track2等效数据
+                        if (string.IsNullOrEmpty(textTrack.Text)) {
+                            string track2Equiv = BitConverter.ToString(value).Replace("-", "");
+                            if (storeTrack2) {
+                                textTrack.Text = track2Equiv;
+                                track2Data = track2Equiv;
+                                displayOut(0, 0, $"Track2等效数据: {track2Equiv}");
+                            }
+                        }
                         break;
 
-                    default:
-                        // 其他不处理，可以根据需要添加更多 tag 支持
+                    case 0x70: // Record Template
+                    case 0x77: // Response Message Template Format 2
+                        ParseTLV(value, 0, value.Length, priority, storeTrack2);
+                        break;
+
+                    case 0x80: // Response Message Template Format 1
+                        if (len > 2) { // 确保有足够的数据
+                                       // 跳过AIP(2字节)
+                            ParseTLV(value, 2, value.Length, priority, storeTrack2);
+                        }
                         break;
                 }
             }
+
+            return track2Data;
         }
 
 
@@ -869,6 +1011,31 @@ namespace EMVCard
             }
 
             return byteCount;
+        }
+
+        private void ParseRecordContent(byte[] buffer, long len) {
+            // 检查是否是模板格式(70开头)
+            if (buffer[0] == 0x70) {
+                int templateLen = buffer[1];
+                int startPos = 2;
+
+                // 处理长格式长度
+                if (buffer[1] > 0x80) {
+                    int lenBytes = buffer[1] & 0x7F;
+                    templateLen = 0;
+                    for (int i = 0; i < lenBytes; i++) {
+                        templateLen = (templateLen << 8) | buffer[2 + i];
+                    }
+                    startPos = 2 + lenBytes;
+                }
+
+                // 使用高优先级(1)解析记录文件
+                ParseTLV(buffer, 0, (int)len, 1, true);
+            }
+            else {
+                // 直接使用高优先级解析TLV数据
+                ParseTLV(buffer, 0, (int)len, 1, true);
+            }
         }
 
     }
