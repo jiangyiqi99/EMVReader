@@ -52,7 +52,7 @@ namespace EMVCard
             // Label1
             // 
             this.Label1.AutoSize = true;
-            this.Label1.Location = new System.Drawing.Point(7, 22);
+            this.Label1.Location = new System.Drawing.Point(9, 53);
             this.Label1.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.Label1.Name = "Label1";
             this.Label1.Size = new System.Drawing.Size(99, 16);
@@ -83,21 +83,21 @@ namespace EMVCard
             // 
             // bConnect
             // 
-            this.bConnect.Location = new System.Drawing.Point(206, 87);
+            this.bConnect.Location = new System.Drawing.Point(121, 82);
             this.bConnect.Margin = new System.Windows.Forms.Padding(4);
             this.bConnect.Name = "bConnect";
-            this.bConnect.Size = new System.Drawing.Size(160, 28);
+            this.bConnect.Size = new System.Drawing.Size(258, 28);
             this.bConnect.TabIndex = 13;
-            this.bConnect.Text = "Connect";
+            this.bConnect.Text = "Connect Card";
             this.bConnect.UseVisualStyleBackColor = true;
             this.bConnect.Click += new System.EventHandler(this.bConnect_Click);
             // 
             // bInit
             // 
-            this.bInit.Location = new System.Drawing.Point(206, 52);
+            this.bInit.Location = new System.Drawing.Point(121, 12);
             this.bInit.Margin = new System.Windows.Forms.Padding(4);
             this.bInit.Name = "bInit";
-            this.bInit.Size = new System.Drawing.Size(160, 28);
+            this.bInit.Size = new System.Drawing.Size(258, 28);
             this.bInit.TabIndex = 12;
             this.bInit.Text = "Initialize";
             this.bInit.UseVisualStyleBackColor = true;
@@ -106,7 +106,7 @@ namespace EMVCard
             // cbReader
             // 
             this.cbReader.FormattingEnabled = true;
-            this.cbReader.Location = new System.Drawing.Point(106, 18);
+            this.cbReader.Location = new System.Drawing.Point(121, 50);
             this.cbReader.Margin = new System.Windows.Forms.Padding(4);
             this.cbReader.Name = "cbReader";
             this.cbReader.Size = new System.Drawing.Size(258, 24);
@@ -144,14 +144,14 @@ namespace EMVCard
             // cbPSE
             // 
             this.cbPSE.FormattingEnabled = true;
-            this.cbPSE.Location = new System.Drawing.Point(24, 192);
+            this.cbPSE.Location = new System.Drawing.Point(12, 192);
             this.cbPSE.Name = "cbPSE";
-            this.cbPSE.Size = new System.Drawing.Size(148, 24);
+            this.cbPSE.Size = new System.Drawing.Size(164, 24);
             this.cbPSE.TabIndex = 24;
             // 
             // bReadApp
             // 
-            this.bReadApp.Location = new System.Drawing.Point(190, 192);
+            this.bReadApp.Location = new System.Drawing.Point(206, 193);
             this.bReadApp.Name = "bReadApp";
             this.bReadApp.Size = new System.Drawing.Size(136, 23);
             this.bReadApp.TabIndex = 25;
@@ -162,7 +162,7 @@ namespace EMVCard
             // label2
             // 
             this.label2.AutoSize = true;
-            this.label2.Location = new System.Drawing.Point(32, 233);
+            this.label2.Location = new System.Drawing.Point(45, 237);
             this.label2.Name = "label2";
             this.label2.Size = new System.Drawing.Size(91, 16);
             this.label2.TabIndex = 26;
@@ -170,15 +170,15 @@ namespace EMVCard
             // 
             // textCardNum
             // 
-            this.textCardNum.Location = new System.Drawing.Point(169, 226);
+            this.textCardNum.Location = new System.Drawing.Point(186, 234);
             this.textCardNum.Name = "textCardNum";
-            this.textCardNum.Size = new System.Drawing.Size(134, 23);
+            this.textCardNum.Size = new System.Drawing.Size(154, 23);
             this.textCardNum.TabIndex = 27;
             // 
             // label3
             // 
             this.label3.AutoSize = true;
-            this.label3.Location = new System.Drawing.Point(32, 268);
+            this.label3.Location = new System.Drawing.Point(47, 284);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(89, 16);
             this.label3.TabIndex = 28;
@@ -186,15 +186,15 @@ namespace EMVCard
             // 
             // textHolder
             // 
-            this.textHolder.Location = new System.Drawing.Point(169, 265);
+            this.textHolder.Location = new System.Drawing.Point(186, 281);
             this.textHolder.Name = "textHolder";
-            this.textHolder.Size = new System.Drawing.Size(134, 23);
+            this.textHolder.Size = new System.Drawing.Size(154, 23);
             this.textHolder.TabIndex = 29;
             // 
             // label4
             // 
             this.label4.AutoSize = true;
-            this.label4.Location = new System.Drawing.Point(35, 302);
+            this.label4.Location = new System.Drawing.Point(68, 332);
             this.label4.Name = "label4";
             this.label4.Size = new System.Drawing.Size(68, 16);
             this.label4.TabIndex = 30;
@@ -202,15 +202,15 @@ namespace EMVCard
             // 
             // textEXP
             // 
-            this.textEXP.Location = new System.Drawing.Point(169, 302);
+            this.textEXP.Location = new System.Drawing.Point(186, 329);
             this.textEXP.Name = "textEXP";
-            this.textEXP.Size = new System.Drawing.Size(134, 23);
+            this.textEXP.Size = new System.Drawing.Size(154, 23);
             this.textEXP.TabIndex = 31;
             // 
             // label5
             // 
             this.label5.AutoSize = true;
-            this.label5.Location = new System.Drawing.Point(47, 343);
+            this.label5.Location = new System.Drawing.Point(80, 386);
             this.label5.Name = "label5";
             this.label5.Size = new System.Drawing.Size(56, 16);
             this.label5.TabIndex = 32;
@@ -218,10 +218,10 @@ namespace EMVCard
             // 
             // textTrack
             // 
-            this.textTrack.Location = new System.Drawing.Point(169, 340);
+            this.textTrack.Location = new System.Drawing.Point(186, 368);
             this.textTrack.Multiline = true;
             this.textTrack.Name = "textTrack";
-            this.textTrack.Size = new System.Drawing.Size(134, 69);
+            this.textTrack.Size = new System.Drawing.Size(154, 69);
             this.textTrack.TabIndex = 33;
             // 
             // bLoadPSE
@@ -236,11 +236,11 @@ namespace EMVCard
             // 
             // bLoadPPSE
             // 
-            this.bLoadPPSE.Location = new System.Drawing.Point(196, 133);
+            this.bLoadPPSE.Location = new System.Drawing.Point(206, 133);
             this.bLoadPPSE.Name = "bLoadPPSE";
-            this.bLoadPPSE.Size = new System.Drawing.Size(129, 44);
+            this.bLoadPPSE.Size = new System.Drawing.Size(136, 44);
             this.bLoadPPSE.TabIndex = 35;
-            this.bLoadPPSE.Text = "Load PPSE\r\n（非接触）";
+            this.bLoadPPSE.Text = "Load PPSE\r\n非接触";
             this.bLoadPPSE.UseVisualStyleBackColor = true;
             this.bLoadPPSE.Click += new System.EventHandler(this.bLoadPPSE_Click);
             // 

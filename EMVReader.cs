@@ -690,8 +690,14 @@ namespace EMVCard
                             label = "App_" + currentAID.Substring(currentAID.Length - 4);
                         }
                         if (!cbPSE.Items.Contains(label)) {
-                            cbPSE.Items.Add(label);
-                            labelToAID[label] = currentAID;
+                            // 在需要填充cbPSE和labelToAID时（比如ParseSFIRecord、bLoadPPSE_Click里）
+                            int aidIndex = cbPSE.Items.Count + 1; // 1起始编号
+                            string itemName = $"{aidIndex}. {label}";
+                            // 保证cbPSE.Items内容不会重复
+                            cbPSE.Items.Add(itemName);
+                            // 用 itemName 作为key存AID
+                            labelToAID[itemName] = currentAID;
+
                         }
                     }
 

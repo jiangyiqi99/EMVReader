@@ -92,6 +92,7 @@
   <PropertyGroup>
     <StartupObject>EMVCard.Program</StartupObject>
   </PropertyGroup>
+  <PropertyGroup />
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Data" />
